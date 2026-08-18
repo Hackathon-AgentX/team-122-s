@@ -1,0 +1,367 @@
+{
+  "name": "CivicConnect AI — Civic Issue Reporter",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "🏙️ CivicConnect AI — Report a Civic Issue",
+        "formDescription": "Report civic problems in <strong>English, Hindi, or Marathi</strong>. Our AI will classify your issue, assign priority, and route it to the right department automatically.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Your Name",
+              "fieldName": "reporter_name",
+              "placeholder": "e.g. Priya Sharma",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Mobile Number",
+              "fieldName": "reporter_phone",
+              "placeholder": "10-digit number"
+            },
+            {
+              "fieldLabel": "Describe the Issue (English / हिंदी / मराठी)",
+              "fieldType": "textarea",
+              "fieldName": "complaint_text",
+              "placeholder": "e.g. \"Large pothole on MG Road\" / \"सड़क पर गड्ढा है\" / \"रस्त्यावर मोठा खड्डा आहे\"",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Location / Address (optional)",
+              "fieldName": "location",
+              "placeholder": "e.g. MG Road near Bus Stop, Pune"
+            },
+            {
+              "fieldLabel": "Proof of Problem",
+              "fieldType": "file"
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Submit with AI Analysis",
+          "path": "civic-report"
+        }
+      },
+      "id": "4cd30db1-a74e-423c-ab23-b85866256c76",
+      "name": "Citizen Report Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "3abaa28b-c5ab-47c1-aad9-4fdb49be366d"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst CATEGORY_RULES = [\n  { category: 'Pothole', keywords: ['pothole','pot hole','road damage','road crack','broken road','road hole','गड्ढा','सड़क में गड्ढा','टूटी सड़क','खराब सड़क','खड्डा','रस्त्यावर खड्डा','खड्डे','तुटलेला रस्ता','रस्त्यात खड्डा','मोठा खड्डा'], baseSeverity: 'HIGH', department: 'Roads & Public Works' },\n  { category: 'Garbage', keywords: ['garbage','trash','waste','rubbish','litter','dump','solid waste','कचरा','कूड़ा','गंदगी','घाण','कचऱ्याचा ढीग','कचरा संकलन'], baseSeverity: 'MEDIUM', department: 'Sanitation' },\n  { category: 'Water Leakage', keywords: ['water leakage','water leak','pipe leak','burst pipe','water pipe','pipeline','पानी की पाइप','पाइप लीक','पानी रिसाव','नल लीक','पाण्याची गळती','पाइप फुटला','पाणी गळत','नळ गळतो','पाणी गळती'], baseSeverity: 'HIGH', department: 'Water & Sewage' },\n  { category: 'Drainage', keywords: ['drainage','drain','blocked drain','clogged drain','waterlogging','flooding','manhole','नाली','नाला','जलजमाव','नाली बंद','गटार','नाले','जलभराव','गटार बंद','मॅनहोल','तुंबलेले गटार'], baseSeverity: 'HIGH', department: 'Storm Water & Drainage' },\n  { category: 'Broken Streetlight', keywords: ['streetlight','street light','light not working','lamp post','dark road','no light','स्ट्रीट लाइट','बत्ती नहीं','लाइट खराब','अँधेरा','दिवा','दिवे नाही','दिवा बंद','रस्त्यावर अंधार','स्ट्रीट लाईट'], baseSeverity: 'MEDIUM', department: 'Electrical / Street Lighting' },\n  { category: 'Sewage', keywords: ['sewage','sewer','sewage overflow','manhole overflow','stench','smell','bad odor','सीवर','सीवेज','बदबू','सांडपाणी','दुर्गंधी','सांडपाणी भरले'], baseSeverity: 'HIGH', department: 'Water & Sewage' },\n  { category: 'Road Damage', keywords: ['road damage','damaged road','road collapsed','road broken','सड़क टूट','रोड ब्रेकडाउन','रस्ता खराब','रस्ता तुटला'], baseSeverity: 'HIGH', department: 'Roads & Public Works' },\n  { category: 'Tree Hazard', keywords: ['fallen tree','tree fallen','dead tree','dangerous tree','झाड गिरा','पेड़ गिरा','झाड पडले','झाड धोकादायक'], baseSeverity: 'HIGH', department: 'Parks & Horticulture' },\n];\nconst MARATHI_MARKERS = ['आहे','नाही','आमच्या','परिसरात','रस्त्यावर','खड्डा','पाण्याची','गळती','गटार','दिवा','आमचा','करा','तुटला','झाले','होते'];\nconst HINDI_MARKERS   = ['है','नहीं','हमारे','सड़क','गड्ढा','नाली','हैं','करें','किया','रहा','था'];\nconst URGENCY_HIGH    = ['urgent','emergency','dangerous','critical','immediately','accident','injury','खतरनाक','तातडीने','मोठा','भयंकर','धोकादायक'];\nconst ESCALATION      = { LOW:'MEDIUM', MEDIUM:'HIGH', HIGH:'CRITICAL', CRITICAL:'CRITICAL' };\nfunction detectLanguage(text) {\n  const devanagari = /[ऀ-ॿ]/.test(text);\n  if (!devanagari) return { language: 'English', confidence: 0.95 };\n  const mScore = MARATHI_MARKERS.filter(w => text.includes(w)).length;\n  const hScore = HINDI_MARKERS.filter(w => text.includes(w)).length;\n  if (mScore >= hScore) return { language: 'Marathi', confidence: Math.min(0.6 + mScore * 0.08, 0.97) };\n  return { language: 'Hindi', confidence: Math.min(0.6 + hScore * 0.08, 0.97) };\n}\nfunction classify(text) {\n  const lower = text.toLowerCase();\n  let best = { category:'General Complaint', score:0, baseSeverity:'MEDIUM', department:'Municipal Corporation' };\n  for (const rule of CATEGORY_RULES) {\n    let score = 0;\n    for (const kw of rule.keywords) {\n      if (lower.includes(kw.toLowerCase()) || text.includes(kw)) score += kw.split(' ').length * 2 + 1;\n    }\n    if (score > best.score) best = { category: rule.category, score, baseSeverity: rule.baseSeverity, department: rule.department };\n  }\n  const confidence = best.score === 0 ? 0.40 : Math.min(0.55 + best.score * 0.04, 0.97);\n  let severity = best.baseSeverity;\n  if (URGENCY_HIGH.some(w => lower.includes(w.toLowerCase()) || text.includes(w))) severity = ESCALATION[severity] || severity;\n  return { category: best.category, confidence: Math.round(confidence * 100), severity, department: best.department };\n}\nfunction generateTrackingId(ts) {\n  const year = new Date(ts).getFullYear();\n  return 'CIV-' + year + '-' + String(Math.floor(Math.random() * 90000) + 10000);\n}\nconst items = $input.all();\nreturn items.map(item => {\n  const text = item.json.complaint_text || '';\n  const lang = detectLanguage(text);\n  const cls  = classify(text);\n  const now  = new Date().toISOString();\n  const severityEmoji = { LOW:'🟢', MEDIUM:'🟡', HIGH:'🔴', CRITICAL:'🚨' };\n  const langFlag      = { English:'🇬🇧', Hindi:'🇮🇳', Marathi:'🇮🇳' };\n  return {\n    json: {\n      reporter_name:   item.json.reporter_name  || 'Anonymous',\n      reporter_phone:  item.json.reporter_phone || '',\n      complaint_text:  text,\n      location:        item.json.location || 'Not specified',\n      language:        lang.language,\n      lang_confidence: Math.round(lang.confidence * 100),\n      lang_flag:       langFlag[lang.language] || '🌐',\n      category:        cls.category,\n      severity:        cls.severity,\n      severity_emoji:  severityEmoji[cls.severity] || '🟡',\n      department:      cls.department,\n      confidence_pct:  cls.confidence,\n      tracking_id:     generateTrackingId(now),\n      status:          'PENDING',\n      submitted_at:    now,\n      is_duplicate:    false,\n    }\n  };\n});\n"
+      },
+      "id": "f665c96b-7af1-49df-9a26-43d415714d20",
+      "name": "AI Classify Issue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "vDeUU9chnAHGYwqI",
+          "mode": "list",
+          "cachedResultName": "civic_complaints",
+          "cachedResultUrl": "/projects/f32zFVf45fnGKzmi/datatables/vDeUU9chnAHGYwqI"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "tracking_id": "={{ $json.tracking_id }}",
+            "complaint_text": "={{ $json.complaint_text }}",
+            "language": "={{ $json.language }}",
+            "category": "={{ $json.category }}",
+            "severity": "={{ $json.severity }}",
+            "department": "={{ $json.department }}",
+            "confidence_pct": "={{ $json.confidence_pct }}",
+            "is_duplicate": "={{ $json.is_duplicate }}",
+            "location": "={{ $json.location }}",
+            "reporter_name": "={{ $json.reporter_name }}",
+            "reporter_phone": "={{ $json.reporter_phone }}",
+            "status": "={{ $json.status }}",
+            "submitted_at": "={{ $json.submitted_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "tracking_id",
+              "displayName": "tracking_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "complaint_text",
+              "displayName": "complaint_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "language",
+              "displayName": "language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "severity",
+              "displayName": "severity",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "department",
+              "displayName": "department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "confidence_pct",
+              "displayName": "confidence_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "is_duplicate",
+              "displayName": "is_duplicate",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "reporter_name",
+              "displayName": "reporter_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "reporter_phone",
+              "displayName": "reporter_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "submitted_at",
+              "displayName": "submitted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c0d869b4-acb0-4b27-a912-b7341de16cf2",
+      "name": "Store Complaint",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ \n\"<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>CivicConnect AI</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4ff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}.card{background:#fff;border-radius:20px;padding:36px;max-width:560px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.12)}.header{text-align:center;margin-bottom:28px}.check{font-size:56px;margin-bottom:12px}.header h1{font-size:1.6rem;font-weight:800;color:#1e293b}.header p{color:#64748b;margin-top:6px}.tracking-box{background:#0f172a;border-radius:14px;padding:20px;text-align:center;margin-bottom:24px}.tracking-label{color:#94a3b8;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}.tracking-id{font-family:monospace;font-size:1.8rem;font-weight:700;color:#34d399;word-break:break-all}.tracking-note{color:#64748b;font-size:.78rem;margin-top:8px}.analysis{background:#f8fafc;border-radius:12px;padding:20px;margin-bottom:20px}.analysis-title{font-size:.85rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px}.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e2e8f0;font-size:.9rem}.row:last-child{border:none}.row .label{color:#64748b}.row .value{font-weight:600;color:#1e293b}.severity-badge{padding:3px 10px;border-radius:999px;font-size:.78rem;font-weight:700}.sev-LOW{background:#dcfce7;color:#14532d}.sev-MEDIUM{background:#fef3c7;color:#92400e}.sev-HIGH{background:#fee2e2;color:#7f1d1d}.sev-CRITICAL{background:#f3e8ff;color:#581c87}.dept-tag{background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:8px;font-size:.82rem;font-weight:600}.footer{text-align:center;color:#94a3b8;font-size:.8rem;margin-top:20px;line-height:1.6}strong{color:#1e293b}</style></head><body><div class='card'><div class='header'><div class='check'>✅</div><h1>Complaint Registered!</h1><p>AI analysis complete. Routed to the right department.</p></div><div class='tracking-box'><div class='tracking-label'>Your Tracking ID</div><div class='tracking-id'>\" + $('AI Classify Issue').item.json.tracking_id + \"</div><div class='tracking-note'>Save this ID to check status anytime</div></div><div class='analysis'><div class='analysis-title'>🤖 AI Analysis Result</div><div class='row'><span class='label'>\" + $('AI Classify Issue').item.json.lang_flag + \" Language</span><span class='value'>\" + $('AI Classify Issue').item.json.language + \" (\" + $('AI Classify Issue').item.json.lang_confidence + \"%)</span></div><div class='row'><span class='label'>📂 Category</span><span class='value'>\" + $('AI Classify Issue').item.json.category + \" (\" + $('AI Classify Issue').item.json.confidence_pct + \"% confidence)</span></div><div class='row'><span class='label'>⚡ Severity</span><span class='value'><span class='severity-badge sev-\" + $('AI Classify Issue').item.json.severity + \"'>\" + $('AI Classify Issue').item.json.severity_emoji + \" \" + $('AI Classify Issue').item.json.severity + \"</span></span></div><div class='row'><span class='label'>🏢 Department</span><span class='value'><span class='dept-tag'>\" + $('AI Classify Issue').item.json.department + \"</span></span></div><div class='row'><span class='label'>👤 Reporter</span><span class='value'>\" + $('AI Classify Issue').item.json.reporter_name + \"</span></div><div class='row'><span class='label'>📍 Location</span><span class='value'>\" + $('AI Classify Issue').item.json.location + \"</span></div></div><div class='footer'>Status: <strong>PENDING REVIEW</strong><br>The municipal team will be notified.<br><br>🏙️ <strong>CivicConnect AI</strong> — Powered by n8n</div></div></body></html>\"\n}}"
+      },
+      "id": "68048549-9f08-4d84-8568-a5330cf252c5",
+      "name": "Confirmation Page",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        672,
+        0
+      ],
+      "webhookId": "972f2fc6-3a65-4ad7-92ff-43ce4ced8ce8"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "shubhanginisonawane06@gmail.com",
+        "subject": "=🚨 [{{ $json.severity }}] New Civic Complaint — {{ $json.tracking_id }} | {{ $json.category }} | {{ $json.department }}",
+        "message": "=\n<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 620px; margin: 0 auto; background: #f8fafc; padding: 24px;\">\n\n  <!-- Header -->\n  <div style=\"background: #0f172a; border-radius: 14px 14px 0 0; padding: 24px; text-align: center;\">\n    <h1 style=\"color: #34d399; font-size: 1.4rem; margin: 0;\">🏙️ CivicConnect AI</h1>\n    <p style=\"color: #94a3b8; margin: 6px 0 0; font-size: 0.9rem;\">New Civic Complaint — Action Required</p>\n  </div>\n\n  <!-- Tracking ID -->\n  <div style=\"background: #1e293b; padding: 16px; text-align: center;\">\n    <p style=\"color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 6px;\">Tracking ID</p>\n    <p style=\"color: #34d399; font-family: monospace; font-size: 1.6rem; font-weight: 700; margin: 0;\">{{ $json.tracking_id }}</p>\n  </div>\n\n  <!-- AI Classification -->\n  <div style=\"background: #fff; border: 1px solid #e2e8f0; border-radius: 0 0 14px 14px; padding: 24px; margin-bottom: 16px;\">\n    <h2 style=\"font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px;\">🤖 AI Classification</h2>\n    <table style=\"width: 100%; border-collapse: collapse; font-size: 0.9rem;\">\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b; width: 40%;\">📂 Category</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.category }} ({{ $json.confidence_pct }}% confidence)</td>\n      </tr>\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b;\">⚡ Severity</td>\n        <td style=\"padding: 10px 0; font-weight: 700; color: #dc2626;\">{{ $json.severity_emoji }} {{ $json.severity }}</td>\n      </tr>\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b;\">🏢 Department</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e40af;\">{{ $json.department }}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px 0; color: #64748b;\">{{ $json.lang_flag }} Language</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.language }} ({{ $json.lang_confidence }}% confidence)</td>\n      </tr>\n    </table>\n  </div>\n\n  <!-- Reporter Details -->\n  <div style=\"background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px; margin-bottom: 16px;\">\n    <h2 style=\"font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px;\">👤 Reporter Details</h2>\n    <table style=\"width: 100%; border-collapse: collapse; font-size: 0.9rem;\">\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b; width: 40%;\">Name</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.reporter_name }}</td>\n      </tr>\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b;\">Mobile</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.reporter_phone || 'Not provided' }}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px 0; color: #64748b;\">📍 Location</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.location }}</td>\n      </tr>\n    </table>\n  </div>\n\n  <!-- Complaint Description -->\n  <div style=\"background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px; margin-bottom: 16px;\">\n    <h2 style=\"font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px;\">📝 Complaint Description</h2>\n    <p style=\"font-size: 0.95rem; color: #1e293b; line-height: 1.6; margin: 0; background: #f8fafc; padding: 14px; border-radius: 8px; border-left: 4px solid #34d399;\">{{ $json.complaint_text }}</p>\n  </div>\n\n  <!-- Submission Info -->\n  <div style=\"background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 24px; margin-bottom: 16px;\">\n    <h2 style=\"font-size: 0.85rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px;\">🕐 Submission Info</h2>\n    <table style=\"width: 100%; border-collapse: collapse; font-size: 0.9rem;\">\n      <tr style=\"border-bottom: 1px solid #f1f5f9;\">\n        <td style=\"padding: 10px 0; color: #64748b; width: 40%;\">Submitted At</td>\n        <td style=\"padding: 10px 0; font-weight: 600; color: #1e293b;\">{{ $json.submitted_at }}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px 0; color: #64748b;\">Status</td>\n        <td style=\"padding: 10px 0; font-weight: 700; color: #d97706;\">⏳ PENDING REVIEW</td>\n      </tr>\n    </table>\n  </div>\n\n  <!-- Footer -->\n  <div style=\"text-align: center; color: #94a3b8; font-size: 0.8rem; margin-top: 8px; line-height: 1.6;\">\n    🏙️ <strong style=\"color: #1e293b;\">CivicConnect AI</strong> — Powered by n8n<br>\n    Please approve or reject this complaint using the buttons below.\n  </div>\n\n</div>\n",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "buttonDisapprovalStyle": "primary"
+          }
+        },
+        "options": {}
+      },
+      "id": "64a0d255-e802-4cec-9401-67694baba999",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        32
+      ],
+      "webhookId": "f96027c6-374c-4100-8e4f-c5fe4a1187da",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "f31uqW2YzeSvx4iL",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Citizen Report Form": {
+      "main": [
+        [
+          {
+            "node": "AI Classify Issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Classify Issue": {
+      "main": [
+        [
+          {
+            "node": "Store Complaint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Complaint": {
+      "main": [
+        [
+          {
+            "node": "Confirmation Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmation Page": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "80874b1d-be8c-49f5-87fa-cbe36932b972",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f08818f58b0873dc36bef8c39d9ee4d9d1c38314016d5f36b82a21c81a4457b0"
+  },
+  "nodeGroups": [
+    {
+      "id": "9b077f85-b1a7-45e1-b2c6-9d2df0d5fd19",
+      "name": "AI Analysis & Storage",
+      "nodeIds": [
+        "f665c96b-7af1-49df-9a26-43d415714d20",
+        "c0d869b4-acb0-4b27-a912-b7341de16cf2"
+      ],
+      "description": "Classifies language/issue/severity, routes to department, saves to Data Table"
+    },
+    {
+      "id": "b6489a0c-7a02-4f7e-9f4e-e3d0fc970cfb",
+      "name": "Result",
+      "nodeIds": [
+        "68048549-9f08-4d84-8568-a5330cf252c5"
+      ],
+      "description": "Shows tracking ID and full AI analysis to the citizen"
+    }
+  ],
+  "id": "gn3nhjOK3UNcr9Ty",
+  "tags": []
+}
